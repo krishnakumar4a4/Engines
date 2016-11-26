@@ -32,11 +32,11 @@
 
 %%Start an event manager to receive all the events
 start_mgr() ->
-    %%Unique events cache table
-    ets:new(events,[named_table,ordered_set]),
-    
+  
     case ?MODULE:start_link() of
 	{ok,EPid} ->
+	    %%Unique events cache table
+	    ets:new(events,[named_table,ordered_set,{read_concurrency,true}]), 
 	    %%Take access on the table
 	    ets:give_away(events,EPid,[]),
 	    %%Add a handler that handles url likes
@@ -191,7 +191,7 @@ register_with_new_worker(Url,EventManPid) ->
 	registered ->
 	    io:format("inserting into db"),
 	    ets:insert(events,{Url,NewWorkerPid}),
-	    io:format("~nlist:~p~n",[ets:tab2list(events)]),
+	    %%io:format("~nlist:~p~n",[ets:tab2list(events)]),
 	    ok;
 	_ ->
 	    io:format("demolishing pid:~p~n",[NewWorkerPid]),

@@ -109,8 +109,14 @@ init(InitArgs) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call({get},_From,State) ->
-    [H|T] = State#state.buffer_workers,
-    {reply,H,State#state{buffer_workers = T}};
+    case State#state.buffer_workers of
+	[] ->
+	    %%Handle below case 
+	    {ok,NewPid} = supervisor:start_child(worker_pool_sup,[]),
+	    {reply,NewPid,State#state{buffer_workers = []}};
+	[H|T] ->
+	    {reply,H,State#state{buffer_workers = T}}
+    end;
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
