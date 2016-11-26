@@ -142,6 +142,9 @@ handle_cast({demolish,Pid},State) ->
 	undefined ->
 	    {noreply,State}
     end;
+handle_cast({add,FreePids},State) ->
+    {noreply,State#state{buffer_workers = FreePids ++ 
+			     State#state.buffer_workers}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -192,4 +195,4 @@ get_me_worker() ->
 
 demolish_worker(Pid) ->
     %%Asynchronous action as we dont bother about this pid anymore
-    gen_server:cast(worker_pool_man,{demolish,Pid},100).
+    gen_server:cast(worker_pool_man,{demolish,Pid}).

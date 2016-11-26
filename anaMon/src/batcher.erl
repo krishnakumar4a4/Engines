@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 26 Nov 2016 by  <krishnakumar@KRISHNAKUMAR-HP>
 %%%-------------------------------------------------------------------
--module(worker).
+-module(batcher).
 
 -behaviour(gen_server).
 
@@ -19,8 +19,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {name, %%{url,Pid}
-	       count %%Count of the Url hits
+-record(state, {tables = [] %%List of ets tables
 	       }).
 
 %%%===================================================================
@@ -35,8 +34,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    %%Many workers may exist, so dont name them
-    gen_server:start_link(?MODULE, [], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -70,27 +68,6 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({register,{Url,Pid}}, _From, State) ->
-    %%Register this worker with some Url
-    {reply, registered, State#state{name = {Url,Pid},count=1}};
-handle_call({just_discard},_From,State) ->
-    %% State doesnt matter for me,just discard it
-    {stop,normal,State};
-handle_call({commit_discard},_From,State) ->
-    %%Commit to the database and stop this worker
-    {reply,done_and_stop,State};
-handle_call({discard,{Url,Pid}}, _From, State) when {Url,Pid}
-						    =:= State#state.name->
-    %%Discard the worker process when not necessary by events manager
-    {stop,normal,State};
-handle_call({commit,{Url,Pid}}, _From, State) when Pid=:=self()->
-    %%Update persistent database with the count
-    %%After the commit, this process can be reused,why dont we 
-    %%contact worker_pool_man for reuse
-    {reply,{Url,Pid,State#state.count},State};
-handle_call(get,_From,State) ->
-    {reply,State#state.count,State#state{name = undefined,
-					count = undefined}};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -105,14 +82,27 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({incr,Name}, State) when State#state.name
-					      =:= Name->
-    %%io:format("The count is now ~p at ~p,received ~p~n",[State#state.count + 1,self(),Name]),
-    %%Increment the counter for a Url
-    {noreply, State#state{count = State#state.count + 1}};
-handle_cast(_Msg,State) ->
-    {noreply,State}.
-
+handle_cast({takeover,TabId},State) ->
+    case State#state.tables of
+	[] ->
+	    %%Trigger an event to start loading up the data
+	    erlang:spawn(fun() -> collect_data_from_workers(TabId) end),
+	    {noreply,State#state{tables=[TabId]}};
+	TableList ->
+	    %%If there are multiple tables we can try combining them
+	    %%as well, but it wouldn't be better than taking care of
+	    %%individual tables as combining them leads to N^2 complexity
+	    RevList = lists:reverse(TableList),
+	    %%Trigger an event to start loading up the data
+	    erlang:spawn(fun() -> collect_data_from_workers(TabId) end),
+	    {noreply,State#state{tables=[TabId|RevList]}}
+    end;
+handle_cast({get_permission,Tid,Pid},State) ->
+    %%Give control of accessing database to spawned process
+    ets:give_away(Tid,Pid,[]),
+    {noreply,State};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -155,3 +145,27 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+collect_data_from_workers(Tid) ->
+    gen_server:cast(batcher,{get_permission,Tid,self()}),
+    %%Lock the persistent database and start loading the data
+    %%Here we are storing each and every table data in a file
+    %%Files to be processed in batch to update the DB
+    {Output,FreePids} = ets:foldl(fun({Url,Pid},{Out,PidList}) -> 
+			       {[{Url,gen_server:call(Pid,get,100)}|Out],
+				[Pid|PidList]} end,{[],[]},Tid),
+    case file:open("tab"++integer_to_list(Tid),[write]) of
+	{ok,IoDev} ->
+	    io:format(IoDev,"~p~n",[Output]),
+	    io:format("Data written to file"),
+	    file:close(IoDev),
+	    %%If successfully written to file,remove the table from list
+	    gen_server:cast(batcher,{update_tables,Tid}),
+	    %%Also add the free worker Pids to worker_pool_man
+	    gen_server:cast(worker_pool_man,{add,FreePids});
+	{error,Reason} ->
+	    %%Log this event and find out why the file is not open,
+	    %%Should we retry?
+	    io:format("Can not open file, reason ~p~n",[Reason]),
+	    ok
+    end.

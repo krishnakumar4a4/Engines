@@ -11,8 +11,8 @@
 -behaviour(gen_event).
 
 %% API
--export([start_link/0, add_handler/0]).
--export([start_mgr/0,register_with_new_worker/2]).
+-export([start_link/0, add_handler/1]).
+-export([start_mgr/0]).
 
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2, 
@@ -23,6 +23,12 @@
 -record(state, {worker_pool_caliberate_thres, %%This is used
 		%%to caliberate the worker_pool strategy based
 		%%unique events size
+		ets_tab_threshold = 2000, %%Max size we would 
+		%%allow one table to grow
+		batcher_pid, %%Pid of the batcher server
+		current_table,
+		current_size,
+		next_table,
 		worker_pool_manager 
 	       }).
 
@@ -36,11 +42,13 @@ start_mgr() ->
     case ?MODULE:start_link() of
 	{ok,EPid} ->
 	    %%Unique events cache table
-	    ets:new(events,[named_table,ordered_set,{read_concurrency,true}]), 
+	    Tid = ets:new(events,[ordered_set,{read_concurrency,true}]), 
 	    %%Take access on the table
-	    ets:give_away(events,EPid,[]),
+	    ets:give_away(Tid,EPid,[]),
 	    %%Add a handler that handles url likes
-	    ?MODULE:add_handler(),
+	    ?MODULE:add_handler(Tid),
+	    %%Started the batcher
+	    batcher:start_link(),
 	    EPid;
 	{error,Reason} ->
 	    Reason
@@ -62,8 +70,8 @@ start_link() ->
 %% @spec add_handler() -> ok | {'EXIT', Reason} | term()
 %% @end
 %%--------------------------------------------------------------------
-add_handler() ->
-    gen_event:add_handler(?SERVER, ?MODULE, []).
+add_handler(Tid) ->
+    gen_event:add_handler(?SERVER, ?MODULE, [Tid]).
 
 %%%===================================================================
 %%% gen_event callbacks
@@ -78,16 +86,35 @@ add_handler() ->
 %% @spec init(Args) -> {ok, State}
 %% @end
 %%--------------------------------------------------------------------
-init([]) ->
+init([Tid]) ->
     %%Spin out a worker pool manager
     case worker_pool_man:start_link([{init_tab_size,100}]) of
 	{ok,Pid} ->
-	    {ok, #state{worker_pool_caliberate_thres = 100,
-		       worker_pool_manager = Pid}};
-	{error,already_started} ->
+	    case batcher:start_link() of
+		{ok,BatPid}->
+		    {ok, #state{worker_pool_caliberate_thres = 100,
+				worker_pool_manager = Pid,
+				batcher_pid = BatPid,
+				current_table = Tid,
+			       current_size = 2000}};
+		{already_started,BatPid} ->
+		    {ok, #state{worker_pool_caliberate_thres = 100,
+				worker_pool_manager = Pid,
+				batcher_pid = BatPid,
+			       current_table = Tid,
+				current_size = 2000}};
+		{error,Reason} ->
+		    %%This is a big problem let the authorities know 
+		    %%about it,raise a siren
+		    {stop,Reason}
+	    end;
+	{already_started,Pid} ->
 	    %%Oh, if already started,let us sync the worker pool
 	    %%strategy!!!!!!!!!!!!!!!!!!!!!!!!!
-	    {ok, #state{worker_pool_caliberate_thres = 100}};
+	    {ok, #state{worker_pool_caliberate_thres = 100,
+		       current_table = Tid,
+		       worker_pool_manager = Pid,
+			current_size = 2000}};
 	{error,Reason} ->
 	    %%This is a big problem let the authorities know 
 	    %%about it,raise a siren
@@ -140,19 +167,38 @@ handle_call(_Request, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({like_url,URL}, State) ->
-    case ets:lookup(events,URL) of
+    CurrTab = State#state.current_table,
+    case ets:lookup(CurrTab,URL) of
 	[{URL,WorkPid}] ->
 	    %%Send an increment message to the PID
-	    gen_server:cast(WorkPid,{incr,{URL,WorkPid}});
+	    gen_server:cast(WorkPid,{incr,{URL,WorkPid}}),
+	    {ok, State};
 	[] ->
 	    %%spawns the registration process, if registration
 	    %%never happening,raise an alarm
 	    %%spawn(?MODULE,register_with_new_worker,[URL,self()]),
-	    register_with_new_worker(URL,self())
-    end,
-    {ok, State};
+	    register_with_new_worker(URL,self(),CurrTab),
+	    CurrSize = State#state.current_size - 1,
+	    case CurrSize of
+		10 ->
+		    Tid = ets:new(events,[ordered_set,{read_concurrency,true}]), 
+		    io:format("creating new events table ~p~n",[Tid]),
+		    {ok,State#state{current_size = 10,
+				    next_table = Tid}};
+		0 ->
+		    %%Take access on the table
+		    ets:give_away(CurrTab,State#state.batcher_pid,[]),
+		    io:format("Gave a table to batcher"),
+		    gen_server:cast(batcher,
+				    {takeover,State#state.current_table}),
+		    {ok,State#state{current_size = 
+					State#state.ets_tab_threshold,
+				    current_table = State#state.next_table}};
+		CurrSize ->
+		    {ok,State#state{current_size = CurrSize}}
+	    end
+    end;
 handle_info(_Info, State) ->
-
     {ok, State}.
 
 %%--------------------------------------------------------------------
@@ -183,18 +229,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-register_with_new_worker(Url,EventManPid) ->
+register_with_new_worker(Url,EventManPid,TabId) ->
     NewWorkerPid = worker_pool_man:get_me_worker(),
     case gen_server:call(NewWorkerPid,{register,
 				  {Url,NewWorkerPid}},
 			 infinity) of
 	registered ->
-	    io:format("inserting into db"),
-	    ets:insert(events,{Url,NewWorkerPid}),
+	    %%io:format("inserting into db"),
+	    ets:insert(TabId,{Url,NewWorkerPid}),
 	    %%io:format("~nlist:~p~n",[ets:tab2list(events)]),
 	    ok;
 	_ ->
 	    io:format("demolishing pid:~p~n",[NewWorkerPid]),
 	    worker_pool_pid:demolish_worker(NewWorkerPid),
-	    register_with_new_worker(Url,EventManPid)
+	    register_with_new_worker(Url,EventManPid,TabId)
     end.
