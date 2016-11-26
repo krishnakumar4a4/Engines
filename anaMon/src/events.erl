@@ -78,18 +78,9 @@ add_handler() ->
 %%--------------------------------------------------------------------
 init([]) ->
     %%Spin out a worker pool manager
-    case worker_pool_man:start_link([{init_tab_size,100}]) of
-	{ok,Pid} ->
-	    {ok, #state{worker_pool_caliberate_thres = 100}};
-	{error,already_started} ->
-	    %%Oh, if already started,let us sync the worker pool
-	    %%strategy!!!!!!!!!!!!!!!!!!!!!!!!!
-	    {ok, #state{worker_pool_caliberate_thres = 100}};
-	{error,Reason} ->
-	    %%This is a big problem let the authorities know 
-	    %%about it,raise a siren
-	    {stop,Reason}
-    end.
+    
+    {ok, #state{worker_pool_caliberate_thres = 1000}}.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
