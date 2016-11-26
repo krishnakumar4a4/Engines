@@ -12,7 +12,7 @@
 
 %% API
 -export([start_link/0, add_handler/0]).
--export([mgr/0]).
+-export([start_mgr/0,register_with_new_worker/2]).
 
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2, 
@@ -31,12 +31,14 @@
 %%%===================================================================
 
 %%Start an event manager to receive all the events
-mgr() ->
+start_mgr() ->
     %%Unique events cache table
     ets:new(events,[named_table,ordered_set]),
     
     case ?MODULE:start_link() of
 	{ok,EPid} ->
+	    %%Take access on the table
+	    ets:give_away(events,EPid,[]),
 	    %%Add a handler that handles url likes
 	    ?MODULE:add_handler(),
 	    EPid;
@@ -78,9 +80,19 @@ add_handler() ->
 %%--------------------------------------------------------------------
 init([]) ->
     %%Spin out a worker pool manager
-    
-    {ok, #state{worker_pool_caliberate_thres = 1000}}.
-
+    case worker_pool_man:start_link([{init_tab_size,100}]) of
+	{ok,Pid} ->
+	    {ok, #state{worker_pool_caliberate_thres = 100,
+		       worker_pool_manager = Pid}};
+	{error,already_started} ->
+	    %%Oh, if already started,let us sync the worker pool
+	    %%strategy!!!!!!!!!!!!!!!!!!!!!!!!!
+	    {ok, #state{worker_pool_caliberate_thres = 100}};
+	{error,Reason} ->
+	    %%This is a big problem let the authorities know 
+	    %%about it,raise a siren
+	    {stop,Reason}
+    end.
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -128,7 +140,16 @@ handle_call(_Request, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({like_url,URL}, State) ->
-    []
+    case ets:lookup(events,URL) of
+	[{URL,WorkPid}] ->
+	    %%Send an increment message to the PID
+	    gen_server:cast(WorkPid,{incr,{URL,WorkPid}});
+	[] ->
+	    %%spawns the registration process, if registration
+	    %%never happening,raise an alarm
+	    %%spawn(?MODULE,register_with_new_worker,[URL,self()]),
+	    register_with_new_worker(URL,self())
+    end,
     {ok, State};
 handle_info(_Info, State) ->
 
@@ -161,3 +182,19 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+register_with_new_worker(Url,EventManPid) ->
+    NewWorkerPid = worker_pool_man:get_me_worker(),
+    case gen_server:call(NewWorkerPid,{register,
+				  {Url,NewWorkerPid}},
+			 infinity) of
+	registered ->
+	    io:format("inserting into db"),
+	    ets:insert(events,{Url,NewWorkerPid}),
+	    io:format("~nlist:~p~n",[ets:tab2list(events)]),
+	    ok;
+	_ ->
+	    io:format("demolishing pid:~p~n",[NewWorkerPid]),
+	    worker_pool_pid:demolish_worker(NewWorkerPid),
+	    register_with_new_worker(Url,EventManPid)
+    end.

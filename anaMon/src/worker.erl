@@ -36,7 +36,7 @@
 %%--------------------------------------------------------------------
 start_link() ->
     %%Many workers may exist, so dont name them
-    gen_server:start_link(?SERVER, ?MODULE, [], []).
+    gen_server:start_link(?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -87,7 +87,7 @@ handle_call({commit,{Url,Pid}}, _From, State) when Pid=:=self()->
     %%Update persistent database with the count
     %%After the commit, this process can be reused,why dont we 
     %%contact worker_pool_man for reuse
-    {reply,done,State};
+    {reply,{Url,Pid,State#state.count},State};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -102,7 +102,9 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({inc,{Url,Pid}}, State) ->
+handle_cast({incr,Name}, State) when State#state.name
+					      =:= Name->
+    io:format("The count is now ~p at ~p,received ~p~n",[State#state.count + 1,self(),Name]),
     %%Increment the counter for a Url
     {noreply, State#state{count = State#state.count + 1}};
 handle_cast(_Msg,State) ->

@@ -12,7 +12,7 @@
 
 %% API
 -export([start_link/0]).
--export([add/1,count/0]).
+-export([add/1,count/0,demolish_worker/1]).
 %% Supervisor callbacks
 -export([init/1]).
 
@@ -57,9 +57,9 @@ init([]) ->
 
     AChild = #{id => lil_worker,
 	       start => {worker, start_link, []},
-	       restart => permanent,
-	       shutdown => 5000
-%%	       type => worker,
+	       restart => permanent
+%%	       shutdown => 5000,
+%%	       type => worker
 %%	       modules => ['AModule']
 	      },
 
@@ -73,5 +73,17 @@ add(Count) when is_integer(Count) ->
     [supervisor:start_child(worker_pool_sup,[])||_N<-lists:seq(1,Count)].
 
 count() ->
-    supervisor:count_children().
+    supervisor:count_children(worker_pool_sup).
+
+demolish_worker(Pid) ->
+    case supervisor:terminate_child(worker_pool_sup,Pid) of
+	ok ->
+	    supervisor:start_child(worker_pool_sup,[]);
+	Error ->
+	    %%Kill the process forcefully if it still exists
+	    %%Log the error message so that authorities would
+	    %%about this
+	    exit(Pid,kill),
+	    undefined
+    end.
 

@@ -11,7 +11,8 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
+-export([get_me_worker/0,demolish_worker/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -19,11 +20,14 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {last_event_man_sync %%Time stamp of last
+-record(state, {last_event_man_sync, %%Time stamp of last
 	       %%time event manager synced
-		last_event_man_tab_size %%Size of events table last known
-		buffer_worker_pool = 10 %%10 percent of workers
+		last_event_man_tab_size, %%Size of events table last known
+		worker_pool_size,  %%Current worker pool size
+		buffer_percent, %%10 percent of workers
 		%%should be created beforehand to meet the demand
+		buffer_workers, %%New workers are stored here
+		worker_pool_sup %%Worker pool supervisor PID
 	       }).
 
 %%%===================================================================
@@ -57,17 +61,37 @@ start_link(InitArgs) ->
 %%--------------------------------------------------------------------
 init(InitArgs) ->
     LastSyncTime = try erlang:timestamp() 
-		   catch Err1:Reas1 -> erlang:now() end,
-    LastEventTabSize = try is_integer(proplists:get_value(init_tab_size,InitArgs))
-		       catch Err2:Reas2 -> 10 end,
-    case catch [worker:start()||lists:seq(1,LastEventTabSize)] of
-	Status when is_list(Status) ->
-	    {ok, #state{last_event_man_sync = LastSyncTime,
-			last_event_tab_size = LastEventTabSize}};
-	Error ->
+		   catch _Err1:_Reas1 -> erlang:now() end,
+    LastEventTabSize = try [Size||Size=proplists:get_value(init_tab_size,InitArgs),is_integer(Size)]
+		       catch _Err2:_Reas2 -> 0 end,
+    %%Putting a supervisor for worker processes may nit be good 
+    %%idea as when some worker is dead,supervisor restarts it 
+    %%with a new pid, we never know that new pid until the 
+    %%new process sends back a message to us.
+    case catch worker_pool_sup:start_link() of
+	{ok,WorkPoolSupRef} ->
+	    case catch worker_pool_sup:add(LastEventTabSize+10) of
+		Status when is_list(Status) ->
+		    %%We need to monitor the child worker processes
+		    WorkerList = [Pid||{Res,Pid}<-Status,Res==ok],
+		    {ok, #state{last_event_man_sync = LastSyncTime,
+				last_event_man_tab_size = LastEventTabSize,
+				%%Let us get the current worker pool status
+				worker_pool_size = proplists:get_value(workers,
+								       worker_pool_sup:count()),
+			       buffer_percent = 10,
+				buffer_workers = WorkerList,
+				worker_pool_sup = WorkPoolSupRef
+			       }};
+		Error ->
+		    %%This is a big problem let the authorities know 
+		    %%about it,raise a siren
+		    {stop,Error}
+	    end;
+	ErrorReason ->
 	    %%This is a big problem let the authorities know 
 	    %%about it,raise a siren
-	    {stop,Error}
+	    {stop,ErrorReason}
     end.
 
 %%--------------------------------------------------------------------
@@ -84,6 +108,10 @@ init(InitArgs) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call({get},_From,State) ->
+    [H|T] = State#state.buffer_workers,
+    {reply,H,State#state{buffer_workers = T}};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -98,6 +126,16 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_cast({demolish,Pid},State) ->
+    case worker_pool_sup:restart_pid(Pid) of
+	{ok,NewPid} ->
+	    %%We assume that this function is only called
+	    %%after get_me_worker,hence old pid should be removed
+	    {noreply,State#state{buffer_workers =
+				     [NewPid|State#state.buffer_workers]}};
+	undefined ->
+	    {noreply,State}
+    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -142,3 +180,10 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_me_worker() ->
+    gen_server:call(worker_pool_man,{get},100).
+
+demolish_worker(Pid) ->
+    %%Asynchronous action as we dont bother about this pid anymore
+    gen_server:cast(worker_pool_man,{demolish,Pid},100).
