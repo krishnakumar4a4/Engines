@@ -157,7 +157,7 @@ collect_data_from_workers(Tid) ->
     case file:open("tab"++integer_to_list(Tid),[write]) of
 	{ok,IoDev} ->
 	    io:format(IoDev,"~p~n",[Output]),
-	    io:format("Data written to file"),
+	    io:format("Data written to file~n"),
 	    file:close(IoDev),
 	    %%If successfully written to file,remove the table from list
 	    gen_server:cast(batcher,{update_tables,Tid}),

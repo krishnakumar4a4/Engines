@@ -188,7 +188,7 @@ handle_info({like_url,URL}, State) ->
 		0 ->
 		    %%Take access on the table
 		    ets:give_away(CurrTab,State#state.batcher_pid,[]),
-		    io:format("Gave a table to batcher"),
+		    io:format("Gave a table to batcher~n"),
 		    gen_server:cast(batcher,
 				    {takeover,State#state.current_table}),
 		    {ok,State#state{current_size = 
