@@ -4,15 +4,15 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 26 Nov 2016 by  <krishnakumar@KRISHNAKUMAR-HP>
+%%% Created :  8 Dec 2016 by  <krishnakumar@KRISHNAKUMAR-HP>
 %%%-------------------------------------------------------------------
--module(worker_pool_sup).
+-module(anaMon_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
--export([add/1,count/0,demolish_worker/1]).
+-export([start_link/1]).
+
 %% Supervisor callbacks
 -export([init/1]).
 
@@ -29,8 +29,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+start_link(Args) ->
+    supervisor:start_link({local, ?SERVER}, ?MODULE, Args).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -49,41 +49,34 @@ start_link() ->
 %%                     {error, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([]) ->
+init([CacheLimit,WokerPoolSize]) ->
 
-    SupFlags = #{strategy => simple_one_for_one,
+    SupFlags = #{strategy => one_for_one,
 		 intensity => 1,
 		 period => 5},
 
-    AChild = #{id => lil_worker,
-	       start => {worker, start_link, []},
-	       restart => permanent
-%%	       shutdown => 5000,
-%%	       type => worker
-%%	       modules => ['AModule']
-	      },
+    EventManChild = #{id => 'eventManager',
+		      start => {events, start_mgr, [CacheLimit]},
+		      restart => permanent,
+		      shutdown => 5000,
+		      type => worker,
+		      modules => [events]},
+    BatcherChild = #{id => 'Batcher',
+		      start => {batcher, start_link, []},
+		      restart => permanent,
+		      shutdown => 5000,
+		      type => worker,
+		      modules => [batcher]},
+    WorkerPoolManChild = #{id => 'workerPoolMan',
+		      start => {worker_pool_man, start_link, 
+				[{init_tab_size,WokerPoolSize}]},
+		      restart => permanent,
+		      shutdown => 5000,
+		      type => worker,
+		      modules => [worker_pool_man]},
 
-    {ok, {SupFlags, [AChild]}}.
+    {ok, {SupFlags, [EventManChild,BatcherChild,WorkerPoolManChild]}}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-add(Count) when is_integer(Count) ->
-    [supervisor:start_child(worker_pool_sup,[])||_N<-lists:seq(1,Count)].
-
-count() ->
-    supervisor:count_children(worker_pool_sup).
-
-demolish_worker(Pid) ->
-    case supervisor:terminate_child(worker_pool_sup,Pid) of
-	ok ->
-	    supervisor:start_child(worker_pool_sup,[]);
-	_Error ->
-	    %%Kill the process forcefully if it still exists
-	    %%Log the error message so that authorities would
-	    %%about this
-	    exit(Pid,kill),
-	    undefined
-    end.
-

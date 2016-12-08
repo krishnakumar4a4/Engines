@@ -12,7 +12,7 @@
 
 %% API
 -export([start_link/0, add_handler/1]).
--export([start_mgr/0]).
+-export([start_mgr/1]).
 
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2, 
@@ -37,8 +37,7 @@
 %%%===================================================================
 
 %%Start an event manager to receive all the events
-start_mgr() ->
-  
+start_mgr(EtsLimit) ->
     case ?MODULE:start_link() of
 	{ok,EPid} ->
 	    %%Unique events cache table
@@ -46,10 +45,10 @@ start_mgr() ->
 	    %%Take access on the table
 	    ets:give_away(Tid,EPid,[]),
 	    %%Add a handler that handles url likes
-	    ?MODULE:add_handler(Tid),
+	    ?MODULE:add_handler([Tid,EtsLimit]),
 	    %%Started the batcher
-	    batcher:start_link(),
-	    EPid;
+	    %%batcher:start_link(),
+	    {ok,EPid};
 	{error,Reason} ->
 	    Reason
     end.
@@ -70,8 +69,8 @@ start_link() ->
 %% @spec add_handler() -> ok | {'EXIT', Reason} | term()
 %% @end
 %%--------------------------------------------------------------------
-add_handler(Tid) ->
-    gen_event:add_handler(?SERVER, ?MODULE, [Tid]).
+add_handler([Tid,EtsLimit]) ->
+    gen_event:add_handler(?SERVER, ?MODULE, [Tid,EtsLimit]).
 
 %%%===================================================================
 %%% gen_event callbacks
@@ -86,40 +85,10 @@ add_handler(Tid) ->
 %% @spec init(Args) -> {ok, State}
 %% @end
 %%--------------------------------------------------------------------
-init([Tid]) ->
-    %%Spin out a worker pool manager
-    case worker_pool_man:start_link([{init_tab_size,100}]) of
-	{ok,Pid} ->
-	    case batcher:start_link() of
-		{ok,BatPid}->
-		    {ok, #state{worker_pool_caliberate_thres = 100,
-				worker_pool_manager = Pid,
-				batcher_pid = BatPid,
-				current_table = Tid,
-			       current_size = 2000}};
-		{already_started,BatPid} ->
-		    {ok, #state{worker_pool_caliberate_thres = 100,
-				worker_pool_manager = Pid,
-				batcher_pid = BatPid,
-			       current_table = Tid,
-				current_size = 2000}};
-		{error,Reason} ->
-		    %%This is a big problem let the authorities know 
-		    %%about it,raise a siren
-		    {stop,Reason}
-	    end;
-	{already_started,Pid} ->
-	    %%Oh, if already started,let us sync the worker pool
-	    %%strategy!!!!!!!!!!!!!!!!!!!!!!!!!
-	    {ok, #state{worker_pool_caliberate_thres = 100,
-		       current_table = Tid,
-		       worker_pool_manager = Pid,
-			current_size = 2000}};
-	{error,Reason} ->
-	    %%This is a big problem let the authorities know 
-	    %%about it,raise a siren
-	    {stop,Reason}
-    end.
+init([Tid,EtsLimit]) ->
+    {ok,#state{current_table = Tid,
+	      current_size = EtsLimit}}.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -187,7 +156,7 @@ handle_info({like_url,URL}, State) ->
 				    next_table = Tid}};
 		0 ->
 		    %%Take access on the table
-		    ets:give_away(CurrTab,State#state.batcher_pid,[]),
+		    ets:give_away(CurrTab,whereis(batcher),[]),
 		    io:format("Gave a table to batcher~n"),
 		    gen_server:cast(batcher,
 				    {takeover,State#state.current_table}),
