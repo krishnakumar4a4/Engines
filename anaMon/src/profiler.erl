@@ -9,7 +9,7 @@
 -module(profiler).
 
 %% API
--export([test1/0,combination/2,print_stats/0]).
+-export([combination/2,print_stats/0]).
 
 %%%===================================================================
 %%% API
@@ -25,20 +25,8 @@
 %%% Internal functions
 %%%===================================================================
 
-test1() ->
-    case events:start_mgr() of
-	{already_started,Pid} ->
-	    [erlang:spawn_link(fun() -> [erlang:send(Pid,{like_url,Name})||_N<-lists:seq(1,10000)] end)||Name<-["krishna","kittu","k1","hello"]];
-	Pid ->
-	    [erlang:spawn_link(fun() -> [erlang:send(Pid,{like_url,Name})||_N<-lists:seq(1,10000)] end)||Name<-["krishna","kittu","k1","hello"]]	
-    end.
 combination(Unique,Repeat) ->
-    case events:start_mgr() of
-		{already_started,Pid} ->
-	    	    [erlang:spawn_link(fun() -> [erlang:send(Pid,{like_url,Name})||_N<-lists:seq(1,Repeat)] end)||Name<-lists:seq(1,Unique)];
-	Pid ->
-	    [erlang:spawn_link(fun() -> [erlang:send(Pid,{like_url,Name})||_N<-lists:seq(1,Repeat)] end)||Name<-lists:seq(1,Unique)]
-    end.
+	[erlang:spawn_link(fun() -> [erlang:send(whereis(events),{like_url,Name})||_N<-lists:seq(1,Repeat)] end)||Name<-lists:seq(1,Unique)].
 
 print_stats() ->
     [io:format("Message que len of Pid:~p is ~p~n",

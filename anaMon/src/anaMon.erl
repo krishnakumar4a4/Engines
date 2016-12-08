@@ -33,7 +33,7 @@
 %%      StartArgs = term()
 %% @end
 %%--------------------------------------------------------------------
-start(_StartType, _StartArgs) ->
+start(_Param_1,_Param_2) ->
     application:load(anaMon),
     CacheLimit = case application:get_env(anaMon,cache_limit) of
 		     {ok,Limit} ->
