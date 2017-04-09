@@ -1,0 +1,53 @@
+### The Challenge ###
+Wanted to create an app that listens for, collects and counts emails
+
+- Design an HTTP API that will accept XML data via post method. Posted XML will contain emails and/or urls.
+- The url can also return new XML of the same structure.
+- Every XML contains unlimited number of emails and urls.
+
+## The XML will look like this:
+
+<?xml version="1.0"?>
+<dataset>
+<emails>
+	<email>user1@gripap.com</email>
+	<email>user2@gripapp.com</email>
+	<email>user3@not-so-cool.com</email>
+</emails>
+<resources>
+	<url>http://localhost:9001/example2.xml</url>
+	<url>http://localhost:9001/example3.xml</url>
+</resources>
+
+Your app should also fetch data from posted resource urls.
+Urls may return XML that contain new urls, fetching should continue until all url resources are fetched.
+XML structure is always the same.
+
+Your app should:
+- Fetch data from resource urls
+- Visit an url only once
+- Drop invalid emails and unwanted domains (wanted domains are gripapp.com
+and grip.com)
+- Count how many times an email is encountered
+- After five minutes of first post, print emails and counts to the console, reset all
+data. Start the timer again at next incoming post.
+
+###How to run the App####
+
+I have taken the following assumptions while building the application:
+1. I assumed the post http API should be handled by a separate web server apart from the web server that handles the URLs present in the xml document. Here the POST API is served by web server spinned off httpd_crawl.erl file and other web server from httpd_test.erl.
+2. I also assumed that the timer would be used to print out the statistics only if the recursive crawling is exceeding the prescribed 15 minutes time. If the crawling finishes early(before 15minutes time), the statistics would be printed immediately on the console and would be ready to accept the next post requests.
+3. I have taken few sample URLs which points to XML files present in the doc_root directory. These URLs as served by the second web server spinned from httpd_test.erl.
+
+FYI, The actual web server which accepts the POST requests runs on 9000 port and the test server runs on 9001 port. If you are running this on mac, you may need to enable them when prompted.
+
+Since I haven't used any frameworks like rebar to implement this application, it doesn't follow a proper application structure like source files should be present in "src" directory, beam files in "ebin" directory etc.
+
+A simple way to test the application: 
+1. Run the command "./crawler" in one tab.
+2. Run "erl" command in a different shell, paste the following code and press enter:
+    file:read_file("example.xml").
+    httpc:request(post, {"http://localhost:9000", [],[],binary_to_list(A)},[],[]).
+    
+    You should see a 200 response on the first tab and also the statistics.
+    
