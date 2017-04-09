@@ -1,0 +1,17 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]
+then
+	erl -sname "crawler_node" -s crawl_sup start_link
+elif [ $# -eq 1 ]
+then 
+	if [ $1 == "compile" ]
+	then
+		echo "compiling"
+		erlc *.erl
+	else
+		echo "Usage"
+		echo "./crawler  --> starts the application"
+		echo "./crawler compile  --> To compile erl files"
+	fi
+fi
