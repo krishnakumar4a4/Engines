@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<dataset>
+<emails>
+	<email>user1@gripap.com</email>
+	<email>user2@gripapp.com</email>
+	<email>user3@not-so-cool.com</email>
+</emails>
+<resources>
+	<url>http://localhost:9001/example2.xml</url>
+	<url>http://localhost:9001/example3.xml</url>
+</resources>
+</dataset>
