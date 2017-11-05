@@ -1,0 +1,184 @@
+ #!/bin/bash
+
+ ls -R $1|grep ":"|sed 's/:$//'|while read line;do echo $line;done|while read line2;do if [ `ls $line2|grep "\.csv$"|wc -l` -eq "0" ];
+ then 
+  echo "No csv files found in: $line2";
+else 
+ # echo "found in $line2";
+ cd $line2;
+
+ ls *.csv|while read line3;
+ do 
+ cl_num=`cat $line3|awk -F',' 'NR==1 {for(i=1;i<=NF;i++){if($i=="lib0")print i}}'`;
+ # echo "col num $cl_num"
+ if [ ! -z $cl_num ];then
+  echo "csv file found: $line3";
+  cat $line3|cut -d',' -f 1,$cl_num|sed 's/,/\",\"/'|sed 's/^/[\"/'|sed 's/$/\"],/'|sed '1d'>$line3.array;
+
+  echo "  <html>
+  <head>
+  <script type=\"text/javascript\" src=\"https://www.gstatic.com/charts/loader.js\"></script>
+  <script type=\"text/javascript\">
+  var array1 = [];
+  var chart;
+  window.onkeyup = keyup;
+  var bucketSize = 10;
+  var fileUpload;
+  var selection = [];
+  var currentSelection = null;
+
+  // console.log(\"bucketSize\", document.getElementById(\"bucketSize\"));
+  var tableDataArray = [];
+  var bucketRangeValues = [];
+
+  //Listen to bucketSize dynamically
+  function keyup(e) {
+   if(e.key === \"Enter\") {
+    bucketSize = e.target.value;
+    tableDataArray = [];
+    bucketRangeValues = [];
+    google.charts.load(\"current\", {packages:[\"corechart\"]});
+    google.charts.setOnLoadCallback(drawChart);
+   }
+  }
+
+  function Upload() {
+   array1 = [" > $line3.html
+
+   cat $line3.array >> $line3.html
+
+   echo "];
+   var newBucketSize = calculateEffectiveBucketSize();
+    // console.log(\"drawing with buck size\",newBucketSize);
+    bucketSize = newBucketSize;
+   google.charts.load(\"current\", {packages:[\"corechart\"]});
+   google.charts.setOnLoadCallback(drawChart);
+  }
+
+    function calculateEffectiveBucketSize() {
+       var min=0;
+   var max=0;
+   var minBucket;
+   var maxBucket;
+   //Find the min and max value
+   for (var i = 0; i < array1.length; i++) {
+    var value = parseFloat(array1[i][1]);
+    if ( value < min )
+     min = value;
+    else if (value > max)
+     max = value;
+    }
+
+    var rounded = Math.round(max-min/10);
+    var roundedString = rounded.toString();
+    var newBucketSize = roundedString[0]*Math.pow(10, roundedString.length-1)
+    //console.log(\"new buck size\", newBucketSize);
+    document.getElementById('bucketSize').value=newBucketSize.toString() ; 
+    return newBucketSize;
+  }
+
+  function drawChart() {
+   var data = google.visualization.arrayToDataTable(array1);
+   var options = {
+    title: 'Some Data',
+    legend: { position: 'none' },
+    histogram: {bucketSize: bucketSize},
+    // enableInteractivity: true
+   };
+
+   chart = new google.visualization.Histogram(document.getElementById('chart_div'));
+   chart.draw(data, options);
+   google.visualization.events.addListener(chart, 'select', selectHandler);
+
+   var min=0;
+   var max=0;
+   var minBucket;
+   var maxBucket;
+   //Find the min and max value
+   for (var i = 0; i < array1.length; i++) {
+    var value = parseFloat(array1[i][1]);
+    if ( value < min )
+     min = value;
+    else if (value > max)
+     max = value;
+    }
+
+    // console.log(\"min\",min,\"max\",max,\"bucketSize\",bucketSize);
+    //Find the min and max bucket emperical values
+    if(!isNaN(bucketSize) && bucketSize !== 0 && bucketSize !== \"\") {
+     minBucket = parseInt(min/bucketSize);
+     // console.log(\"minBucketBefore\",minBucket);
+     minBucket = minBucket <= 0 ? minBucket-1 : minBucket;
+     maxBucket = parseInt(Math.ceil(max/bucketSize));
+    }
+
+    // console.log(\"minBucket\",minBucket,\"maxBucket\",maxBucket);
+    //Actual bucket values
+    var bucketRanges = [];
+    for ( var i = minBucket; i < maxBucket; i++) {
+     bucketRanges.push({bucketMin: i*bucketSize, bucketMax: (i+1)*bucketSize})
+    }
+    // console.log(\"bucketRanges\",bucketRanges);
+
+    //Initialize bucketRanges
+    for ( var i = 0; i < bucketRanges.length; i++){
+     bucketRangeValues.push([[]]);
+    }
+
+    //Grouping by bucket ranges
+    for (var i = 0; i < array1.length; i++) {
+     var value = parseFloat(array1[i][1]);
+     // console.log(\"array1 elem\", array1[i][1], value);
+     for (var j = 0; j < bucketRanges.length; j++) {
+      if (value >= bucketRanges[j].bucketMin && value < bucketRanges[j].bucketMax){
+       bucketRangeValues[j][0].push(array1[i]);
+       // break;
+      }
+     }
+    }
+    // console.log(\"bucketRangeValues\", bucketRangeValues);
+   }
+
+   function selectHandler() {
+    //Selection coordinates
+    // console.log(\"selectionBefore\", selection);
+    var currentSelection = chart.getSelection();
+    if(currentSelection.length != 0 && currentSelection != null && currentSelection != selection) {
+     // console.log(\"currentSelection\", currentSelection);
+     selection = currentSelection
+    }
+    // console.log(\"selection\", selection);
+    tableDataArray = bucketRangeValues[selection[0].row];
+    console.log(tableDataArray);
+
+    google.charts.load('current', {'packages':['table']});
+    google.charts.setOnLoadCallback(drawTable);
+   }
+
+   function drawTable() {
+    var data = new google.visualization.DataTable();
+    data.addColumn('string', 'cell');
+    data.addColumn('string', 'delta');
+    data.addRows(tableDataArray[0]);
+
+    var table = new google.visualization.Table(document.getElementById('table_div'));
+
+    table.draw(data, {showRowNumber: true, width: '100%', height: '100%'});
+   }
+
+   </script>
+   </head>
+   <body onload=\"Upload()\">
+   <label>Bucket Size</label>
+   <input type=\"number\" id=\"bucketSize\" value=\"10\">
+   <div id=\"chart_div\" style=\"width: 900px; height: 500px;\"></div>
+   <div id=\"table_div\" style=\"width: 900px; height: 500px;\"></div>
+   </body>
+   </html>
+   " >> $line3.html
+   rm $line3.array
+  fi
+ done
+ cd -;
+fi;
+done
